@@ -1,3 +1,5 @@
 pyrogram
 tgcrypto
 supabase
+flask
+requests

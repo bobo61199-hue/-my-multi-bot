@@ -6,86 +6,72 @@ from flask import Flask
 from supabase import create_client
 from pyrogram import Client, filters
 from telebot.async_telebot import AsyncTeleBot
-from datetime import datetime, timedelta
 
-# --- Logging ---
+# --- Basic Setup ---
 logging.basicConfig(level=logging.INFO)
-
-# --- Configuration ---
-ADMIN_ID = int(os.environ.get("ADMIN_ID", 7737151643))
 BOT_TOKEN = "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 API_ID = int(os.environ.get("API_ID", 38876766))
 API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 
-# Async Bot & Global Storage
 bot = AsyncTeleBot(BOT_TOKEN)
-running_userbots = {}
 app = Flask(__name__)
 
 @app.route('/')
-def health_check(): return "SYSTEM LIVE", 200
+def home(): return "RUNNING", 200
 
 def run_flask():
+    # Render အတွက် Port Binding ကို သီးသန့် thread နဲ့ run တာ ပိုစိတ်ချရပါတယ်
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- Database Helper (No Global Client) ---
-def get_db():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# --- Userbot Worker ---
-async def start_userbot(uid, session_str, afk_msg):
+# --- AFK Worker ---
+async def start_afk(uid, session, text):
     try:
-        ub = Client(name=f"ub_{uid}", session_string=session_str, 
+        ub = Client(name=f"u_{uid}", session_string=session, 
                     api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await ub.start()
-        running_userbots[uid] = ub
         
         @ub.on_message(filters.private & ~filters.me & ~filters.bot)
-        async def handler(client, message):
-            try:
-                me = await client.get_me()
-                if me.status in ["offline", "long_ago", "last_month"]:
-                    await message.reply(afk_msg)
-            except: pass
+        async def afk_handler(c, m):
+            me = await c.get_me()
+            if me.status in ["offline", "long_ago"]:
+                await m.reply(text)
         
-        logging.info(f"✅ Userbot {uid} started.")
         await asyncio.Event().wait()
-    except Exception as e:
-        logging.error(f"❌ Userbot {uid} failed: {e}")
+    except: pass
 
-# --- Bot Handlers ---
+# --- Bot Command ---
 @bot.message_handler(commands=['start'])
 async def welcome(m):
-    db = get_db()
+    db = create_client(SUPABASE_URL, SUPABASE_KEY)
     res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
     if res.data:
-        await bot.reply_to(m, f"✅ ဝန်ဆောင်မှုရှိသည် ({res.data[0]['expiry_date']})\n\nString ပို့ပါ။")
+        await bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String ပို့ပေးပါ။")
     else:
-        await bot.reply_to(m, "❌ ဝယ်ယူရန် Admin @Cambai138 ဆီ ဆက်သွယ်ပါ။")
+        await bot.reply_to(m, "❌ ဝယ်ယူရန် @Cambai138 ကို ဆက်သွယ်ပါ။")
 
-# --- Main Entry Point ---
+# --- Main Engine ---
 async def main():
-    # Flask ကို thread နဲ့ run ထားမယ် (Port binding အတွက်)
+    # ၁။ Flask ကို အရင်နိုးမယ်
     Thread(target=run_flask, daemon=True).start()
     
-    # Database ထဲက user တွေကို ပြန်နှိုးမယ်
+    # ၂။ Database က User တွေကို ပြန်နှိုးမယ်
     try:
-        db = get_db()
+        db = create_client(SUPABASE_URL, SUPABASE_KEY)
         users = db.table("approved_users").select("*").execute().data
         for u in users:
             if u.get('string') and u.get('afk_text'):
-                asyncio.create_task(start_userbot(u['user_id'], u['string'], u['afk_text']))
-    except Exception as e:
-        logging.error(f"Startup Error: {e}")
+                asyncio.create_task(start_afk(u['user_id'], u['string'], u['afk_text']))
+    except: pass
 
-    logging.info("🚀 Bot is Polling...")
+    # ၃။ Bot ကို Polling စလုပ်မယ်
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
-    # Python 3.14 loop error ကို ကျော်ဖို့ 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    # Python 3.14 ရဲ့ loop error ကို ကျော်ဖို့ loop ကို သေချာသတ်မှတ်ပေးရပါတယ်
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

@@ -16,7 +16,19 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 API_ID = int(os.environ.get("API_ID", 38876766))
 API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 
-# Bot & DB Initialization
+# --- Event Loop Fix (ဒီအပိုင်းက အရေးကြီးဆုံးပါ) ---
+def get_or_create_event_loop():
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+# Global loop ကို အရင်တည်ဆောက်ပါတယ်
+main_loop = get_or_create_event_loop()
+
+# Database & Bot
 bot = telebot.TeleBot(BOT_TOKEN)
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
 running_userbots = {}
@@ -28,16 +40,16 @@ def home(): return "AFK SYSTEM: ONLINE"
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-# --- Userbot Worker (ဒီအပိုင်းက Error တက်နေတာကို ရှင်းပေးပါလိမ့်မယ်) ---
+# --- Userbot Worker ---
 def userbot_worker(uid, session_str, afk_msg):
-    # Thread တစ်ခုစီအတွက် loop အသစ်တစ်ခု အမြဲဆောက်ပေးရပါတယ်
+    # Thread တစ်ခုစီအတွက် သီးသန့် loop ဆောက်ပေးခြင်း
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     async def start_ub():
         try:
             ub = Client(
-                name=f"session_{uid}", 
+                name=f"ub_session_{uid}", 
                 session_string=session_str, 
                 api_id=API_ID, 
                 api_hash=API_HASH, 
@@ -50,18 +62,18 @@ def userbot_worker(uid, session_str, afk_msg):
             async def handler(client, message):
                 try:
                     me = await client.get_me()
+                    # Offline ဖြစ်မှ စာပြန်မည်
                     if me.status in ["offline", "long_ago", "last_month"]:
                         await message.reply(afk_msg)
                 except: pass
             
-            # Bot ကို အရှင်ထားရန်
             await asyncio.Event().wait()
         except Exception as e:
-            print(f"❌ Userbot {uid} Failed: {e}")
+            print(f"❌ Userbot {uid} Error: {e}")
 
     loop.run_until_complete(start_ub())
 
-# --- Admin Handlers ---
+# --- Bot Handlers ---
 @bot.message_handler(commands=['add'])
 def add_user(m):
     if m.chat.id != ADMIN_ID: return
@@ -70,15 +82,14 @@ def add_user(m):
         expiry = (datetime.now() + timedelta(days=int(days))).date().isoformat()
         db.table("approved_users").upsert({"user_id": int(tid), "expiry_date": expiry}).execute()
         bot.reply_to(m, f"✅ User {tid} - {days} ရက် တိုးပေးပြီး။")
-    except: bot.reply_to(m, "⚠️ Use: /add [id] [days]")
+    except: bot.reply_to(m, "⚠️ Format: /add [id] [days]")
 
-# --- User Handlers ---
 @bot.message_handler(commands=['start'])
 def welcome(m):
     uid = m.chat.id
     res = db.table("approved_users").select("*").eq("user_id", uid).execute()
     if res.data:
-        bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိသည် ({res.data[0]['expiry_date']})\n\nString Session ကို ပို့ပေးပါ။")
+        bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိသည် ({res.data[0]['expiry_date']})\n\nString Session ပို့ပါ။")
         bot.register_next_step_handler(m, get_string)
     else: bot.send_message(uid, "❌ ဝယ်ယူရန် Admin @Cambai138 ဆီ ဆက်သွယ်ပါ။")
 
@@ -104,4 +115,5 @@ if __name__ == "__main__":
     except: pass
 
     print("Main Bot Starting...")
-    bot.infinity_polling()
+    # infinity_polling ကို thread ထဲမထည့်ဘဲ main မှာပဲ run ပါတယ်
+    bot.infinity_polling(timeout=60, long_polling_timeout=20)

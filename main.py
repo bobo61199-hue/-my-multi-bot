@@ -1,6 +1,5 @@
 import telebot
 import os
-import time
 import asyncio
 from threading import Thread
 from flask import Flask
@@ -16,21 +15,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 API_ID = int(os.environ.get("API_ID", 38876766))
 API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 
-# --- Event Loop Fix (ဒီအပိုင်းက အရေးကြီးဆုံးပါ) ---
-def get_or_create_event_loop():
-    try:
-        return asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
-
-# Global loop ကို အရင်တည်ဆောက်ပါတယ်
-main_loop = get_or_create_event_loop()
-
-# Database & Bot
 bot = telebot.TeleBot(BOT_TOKEN)
-db = create_client(SUPABASE_URL, SUPABASE_KEY)
 running_userbots = {}
 app = Flask('')
 
@@ -40,21 +25,33 @@ def home(): return "AFK SYSTEM: ONLINE"
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
+# --- Helper Function: Database Call (Loop Error ကင်းစေရန်) ---
+def db_query(action, table, data=None, filters=None):
+    # ဒီနေရာမှာ loop အသစ်ဆောက်ပြီးမှ db ကို ခေါ်ပါမယ်
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    if action == "select":
+        res = db.table(table).select("*").eq(filters[0], filters[1]).execute()
+        return res.data
+    elif action == "upsert":
+        db.table(table).upsert(data).execute()
+    elif action == "update":
+        db.table(table).update(data).eq(filters[0], filters[1]).execute()
+    elif action == "get_all":
+        res = db.table(table).select("*").execute()
+        return res.data
+
 # --- Userbot Worker ---
 def userbot_worker(uid, session_str, afk_msg):
-    # Thread တစ်ခုစီအတွက် သီးသန့် loop ဆောက်ပေးခြင်း
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     async def start_ub():
         try:
-            ub = Client(
-                name=f"ub_session_{uid}", 
-                session_string=session_str, 
-                api_id=API_ID, 
-                api_hash=API_HASH, 
-                in_memory=True
-            )
+            ub = Client(name=f"ub_{uid}", session_string=session_str, 
+                        api_id=API_ID, api_hash=API_HASH, in_memory=True)
             await ub.start()
             running_userbots[uid] = ub
             
@@ -62,14 +59,11 @@ def userbot_worker(uid, session_str, afk_msg):
             async def handler(client, message):
                 try:
                     me = await client.get_me()
-                    # Offline ဖြစ်မှ စာပြန်မည်
                     if me.status in ["offline", "long_ago", "last_month"]:
                         await message.reply(afk_msg)
                 except: pass
-            
             await asyncio.Event().wait()
-        except Exception as e:
-            print(f"❌ Userbot {uid} Error: {e}")
+        except: pass
 
     loop.run_until_complete(start_ub())
 
@@ -80,16 +74,16 @@ def add_user(m):
     try:
         _, tid, days = m.text.split()
         expiry = (datetime.now() + timedelta(days=int(days))).date().isoformat()
-        db.table("approved_users").upsert({"user_id": int(tid), "expiry_date": expiry}).execute()
-        bot.reply_to(m, f"✅ User {tid} - {days} ရက် တိုးပေးပြီး။")
-    except: bot.reply_to(m, "⚠️ Format: /add [id] [days]")
+        db_query("upsert", "approved_users", {"user_id": int(tid), "expiry_date": expiry})
+        bot.reply_to(m, f"✅ User {tid} ကို {days} ရက် တိုးပေးပြီး။")
+    except: bot.reply_to(m, "Format: /add [id] [days]")
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
     uid = m.chat.id
-    res = db.table("approved_users").select("*").eq("user_id", uid).execute()
-    if res.data:
-        bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိသည် ({res.data[0]['expiry_date']})\n\nString Session ပို့ပါ။")
+    res = db_query("select", "approved_users", filters=("user_id", uid))
+    if res:
+        bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိသည် ({res[0]['expiry_date']})\n\nString ပို့ပါ။")
         bot.register_next_step_handler(m, get_string)
     else: bot.send_message(uid, "❌ ဝယ်ယူရန် Admin @Cambai138 ဆီ ဆက်သွယ်ပါ။")
 
@@ -99,21 +93,21 @@ def get_string(m):
 
 def finalize(m, session_str):
     uid, afk_msg = m.chat.id, m.text
-    db.table("approved_users").update({"string": session_str, "afk_text": afk_msg}).eq("user_id", uid).execute()
+    db_query("update", "approved_users", {"string": session_str, "afk_text": afk_msg}, ("user_id", uid))
     Thread(target=userbot_worker, args=(uid, session_str, afk_msg), daemon=True).start()
     bot.send_message(uid, "🚀 AFK Bot စတင်ပါပြီ။")
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
     
-    # Startup: အရင်ရှိပြီးသားသူတွေကို ပြန်နှိုးခြင်း
+    # Startup 
     try:
-        users = db.table("approved_users").select("*").execute().data
+        users = db_query("get_all", "approved_users")
         for u in users:
             if u.get('string') and u.get('afk_text'):
                 Thread(target=userbot_worker, args=(u['user_id'], u['string'], u['afk_text']), daemon=True).start()
     except: pass
 
-    print("Main Bot Starting...")
-    # infinity_polling ကို thread ထဲမထည့်ဘဲ main မှာပဲ run ပါတယ်
-    bot.infinity_polling(timeout=60, long_polling_timeout=20)
+    print("Bot is Polling...")
+    bot.infinity_polling()
+

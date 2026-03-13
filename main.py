@@ -26,8 +26,8 @@ def keep_alive():
 # --- Configuration ---
 ADMIN_ID = 7737151643 
 BOT_TOKEN = "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A"
-SUPABASE_URL = "https://ljqlxbhcbtdvayjyrzfw.supabase.co"
-SUPABASE_KEY = "EyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqcWx4YmhjYnRkdmF5anlyemZ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMTYyNDcsImV4cCI6MjA4ODg5MjI0N30.oEt_8kWTzM_WBYBtJaFvqjnA6uvjL7uHiy4E5ASIymY"
+SUPABASE_URL = "https://xslvzwfizcvdbjckpsem.supabase.co"
+SUPABASE_KEY = ''''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzbHZ6d2ZpemN2ZGJqY2twc2VtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzODc3ODYsImV4cCI6MjA4ODk2Mzc4Nn0.DC-XWrqBGno4vnWFPP2cPqBMG0zB-LEeKP7Hv6VPnc4""
 
 API_ID = 38876766
 API_HASH = "e8d2d82f38704f4fcf171d3d35d3f811"

@@ -31,8 +31,8 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- Database Setup (Inside Async) ---
-async def get_db():
+# --- Database Helper (No Global Client) ---
+def get_db():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Userbot Worker ---
@@ -56,24 +56,24 @@ async def start_userbot(uid, session_str, afk_msg):
     except Exception as e:
         logging.error(f"❌ Userbot {uid} failed: {e}")
 
-# --- Main Bot Handlers ---
+# --- Bot Handlers ---
 @bot.message_handler(commands=['start'])
-async def send_welcome(m):
-    db = await get_db()
+async def welcome(m):
+    db = get_db()
     res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
     if res.data:
         await bot.reply_to(m, f"✅ ဝန်ဆောင်မှုရှိသည် ({res.data[0]['expiry_date']})\n\nString ပို့ပါ။")
     else:
         await bot.reply_to(m, "❌ ဝယ်ယူရန် Admin @Cambai138 ဆီ ဆက်သွယ်ပါ။")
 
-# --- Startup & Main Loop ---
+# --- Main Entry Point ---
 async def main():
-    # Flask ကို Background မှာ run မယ်
+    # Flask ကို thread နဲ့ run ထားမယ် (Port binding အတွက်)
     Thread(target=run_flask, daemon=True).start()
     
-    # အရင်ရှိပြီးသား User တွေကို ပြန်နှိုးမယ်
+    # Database ထဲက user တွေကို ပြန်နှိုးမယ်
     try:
-        db = await get_db()
+        db = get_db()
         users = db.table("approved_users").select("*").execute().data
         for u in users:
             if u.get('string') and u.get('afk_text'):
@@ -85,5 +85,7 @@ async def main():
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    # Python 3.14 loop error ကို ကျော်ဖို့ 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())

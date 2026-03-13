@@ -25,23 +25,31 @@ def home(): return "AFK SYSTEM: ONLINE"
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-# --- Helper Function: Database Call (Loop Error ကင်းစေရန်) ---
-def db_query(action, table, data=None, filters=None):
-    # ဒီနေရာမှာ loop အသစ်ဆောက်ပြီးမှ db ကို ခေါ်ပါမယ်
+# --- Isolated Database Handler (Runtime Error ကို ကျော်လွှားရန်) ---
+def safe_db_call(func, *args, **kwargs):
+    # Loop အသစ်စက်စက် တစ်ခုဆောက်ပြီးမှ DB အလုပ်လုပ်ခိုင်းတာပါ
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
-    
-    if action == "select":
-        res = db.table(table).select("*").eq(filters[0], filters[1]).execute()
-        return res.data
-    elif action == "upsert":
-        db.table(table).upsert(data).execute()
-    elif action == "update":
-        db.table(table).update(data).eq(filters[0], filters[1]).execute()
-    elif action == "get_all":
-        res = db.table(table).select("*").execute()
-        return res.data
+    try:
+        db = create_client(SUPABASE_URL, SUPABASE_KEY)
+        return func(db, *args, **kwargs)
+    finally:
+        loop.close()
+
+# Database Functions
+def get_user_data(db, uid):
+    res = db.table("approved_users").select("*").eq("user_id", uid).execute()
+    return res.data
+
+def upsert_user(db, data):
+    db.table("approved_users").upsert(data).execute()
+
+def update_user(db, data, uid):
+    db.table("approved_users").update(data).eq("user_id", uid).execute()
+
+def get_all_active_users(db):
+    res = db.table("approved_users").select("*").execute()
+    return res.data
 
 # --- Userbot Worker ---
 def userbot_worker(uid, session_str, afk_msg):
@@ -74,14 +82,14 @@ def add_user(m):
     try:
         _, tid, days = m.text.split()
         expiry = (datetime.now() + timedelta(days=int(days))).date().isoformat()
-        db_query("upsert", "approved_users", {"user_id": int(tid), "expiry_date": expiry})
+        safe_db_call(upsert_user, {"user_id": int(tid), "expiry_date": expiry})
         bot.reply_to(m, f"✅ User {tid} ကို {days} ရက် တိုးပေးပြီး။")
     except: bot.reply_to(m, "Format: /add [id] [days]")
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
     uid = m.chat.id
-    res = db_query("select", "approved_users", filters=("user_id", uid))
+    res = safe_db_call(get_user_data, uid)
     if res:
         bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိသည် ({res[0]['expiry_date']})\n\nString ပို့ပါ။")
         bot.register_next_step_handler(m, get_string)
@@ -93,16 +101,16 @@ def get_string(m):
 
 def finalize(m, session_str):
     uid, afk_msg = m.chat.id, m.text
-    db_query("update", "approved_users", {"string": session_str, "afk_text": afk_msg}, ("user_id", uid))
+    safe_db_call(update_user, {"string": session_str, "afk_text": afk_msg}, uid)
     Thread(target=userbot_worker, args=(uid, session_str, afk_msg), daemon=True).start()
     bot.send_message(uid, "🚀 AFK Bot စတင်ပါပြီ။")
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
     
-    # Startup 
+    # Startup: အရင်ရှိပြီးသားသူတွေကို ပြန်နှိုးခြင်း
     try:
-        users = db_query("get_all", "approved_users")
+        users = safe_db_call(get_all_active_users)
         for u in users:
             if u.get('string') and u.get('afk_text'):
                 Thread(target=userbot_worker, args=(u['user_id'], u['string'], u['afk_text']), daemon=True).start()
@@ -110,4 +118,3 @@ if __name__ == "__main__":
 
     print("Bot is Polling...")
     bot.infinity_polling()
-

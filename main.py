@@ -1,68 +1,100 @@
-import asyncio
+import telebot
 import os
-import requests
-from flask import Flask
+import time
 from threading import Thread
-from pyrogram import Client, filters
+from flask import Flask
 from supabase import create_client
+from pyrogram import Client, filters
+from datetime import datetime, timedelta
 
-# --- Flask Server (Render Port Binding အတွက်) ---
+# --- Setup ---
 app = Flask('')
-
-@app.route('/')
-def home(): 
-    return "AFK SYSTEM IS LIVE"
-
-def run_flask():
-    # Render Dashboard က PORT ကို ယူမယ်၊ မရှိရင် 10000 သုံးမယ်
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-# --- Configuration ---
-# မင်းရဲ့ Environment Variables တွေ အကုန်ဒီမှာ ယူထားတယ်
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-API_ID = int(os.environ.get("API_ID", 0))
-API_HASH = os.environ.get("API_HASH")
+ADMIN_ID = 7737151643 # မင်းရဲ့ ID
 
+bot = telebot.TeleBot(BOT_TOKEN)
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
+running_userbots = {}
 
-# --- Bot Logic ---
-async def start_services():
-    bot = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-    
-    @bot.on_message(filters.command("start") & filters.private)
-    async def start(c, m):
-        await m.reply("✅ Bot အလုပ်လုပ်နေပါပြီဟျောင့်။")
+# --- Flask Server ---
+@app.route('/')
+def home(): return "AFK SYSTEM IS LIVE"
 
-    print("Starting Telegram Bot...")
-    await bot.start()
-    
-    # Userbot တွေ ပြန်နှိုးတဲ့အပိုင်း (Error မတက်အောင် try အုပ်ထားတယ်)
-    try:
-        users = db.table("approved_users").select("*").execute().data
-        for u in users:
-            if u.get('string'):
-                # ဒီမှာ မင်းရဲ့ userbot logic ကို ထည့်ပါ
-                pass
-    except Exception as e:
-        print(f"DB Error: {e}")
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-    # Loop ကို အမြဲပွင့်နေအောင် လုပ်ထားခြင်း
-    await asyncio.Event().wait()
+# --- Userbot Runner ---
+def start_userbot(uid, session_str, afk_text):
+    # Pyrogram ကို နောက်ကွယ်မှာ loop နဲ့ run တာ
+    async def run():
+        try:
+            ub = Client(f"user_{uid}", session_string=session_str, api_id=38876766, api_hash="e8d2d82f38704f4fcf171d3d35d3f811")
+            await ub.start()
+            running_userbots[uid] = ub
+            
+            @ub.on_message(filters.private & ~filters.me)
+            async def reply(client, message):
+                me = await client.get_me()
+                if me.status in ["offline", "long_ago"]:
+                    await message.reply(afk_text)
+            
+            print(f"✅ Userbot {uid} started!")
+        except: pass
 
-# --- Main Entry Point ---
-if __name__ == "__main__":
-    # Flask ကို Thread နဲ့ အရင်နှိုးမယ် (No open ports error မတက်အောင်)
-    t = Thread(target=run_flask, daemon=True)
-    t.start()
-    
-    # Event Loop ပြဿနာကို ဖြေရှင်းရန်
+    import asyncio
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    loop.run_until_complete(run())
+    loop.run_forever()
+
+# --- Main Bot (Telebot) Handlers ---
+
+@bot.message_handler(commands=['start'])
+def start(m):
+    uid = m.chat.id
+    # Database မှာ ဝယ်ထားတဲ့ user လား စစ်မယ်
+    res = db.table("approved_users").select("*").eq("user_id", uid).execute()
+    if res.data:
+        bot.send_message(uid, f"✅ ဝန်ဆောင်မှုရှိပါသည်။ (သက်တမ်း: {res.data[0]['expiry_date']})\n\nString Session ပို့ပေးပါ။")
+        bot.register_next_step_handler(m, get_string)
+    else:
+        bot.send_message(uid, "❌ ဝန်ဆောင်မှု မဝယ်ရသေးပါ။ ဝယ်ယူရန် Admin ကို ဆက်သွယ်ပါ။")
+
+def get_string(m):
+    uid = m.chat.id
+    string = m.text
+    bot.send_message(uid, "✅ String ရပါပြီ။ Offline ဖြစ်ချိန် ပြန်စေချင်တဲ့ စာသား ပို့ပေးပါ။")
+    bot.register_next_step_handler(m, lambda msg: save_and_start(msg, string))
+
+def save_and_start(m, string):
+    uid = m.chat.id
+    afk_text = m.text
+    # Database မှာ update လုပ်မယ်
+    db.table("approved_users").update({"string": string, "afk_text": afk_text}).eq("user_id", uid).execute()
     
+    # Userbot ကို thread အသစ်နဲ့ နှိုးမယ်
+    Thread(target=start_userbot, args=(uid, string, afk_text), daemon=True).start()
+    bot.send_message(uid, "🚀 AFK Bot စတင်အလုပ်လုပ်ပါပြီ။ လိုင်းဆင်းသွားရင် auto reply ပြန်ပေးပါလိမ့်မယ်။")
+
+# --- Admin Section ---
+@bot.message_handler(commands=['add'])
+def add_user(m):
+    if m.chat.id != ADMIN_ID: return
     try:
-        loop.run_until_complete(start_services())
-    except KeyboardInterrupt:
-        pass
+        args = m.text.split()
+        target_id = args[1]
+        days = int(args[2]) # ၁ လ ဆို ၃၀၊ တသက်သာဆို ၉၉၉၉
+        expiry = (datetime.now() + timedelta(days=days)).date().isoformat()
+        
+        db.table("approved_users").upsert({"user_id": target_id, "expiry_date": expiry}).execute()
+        bot.send_message(ADMIN_ID, f"✅ User {target_id} ကို {days} ရက် သတ်မှတ်ပေးလိုက်ပါပြီ။")
+    except:
+        bot.send_message(ADMIN_ID, "⚠️ Format: /add [user_id] [days]")
+
+# --- Execution ---
+if __name__ == "__main__":
+    Thread(target=run_flask, daemon=True).start()
+    print("Bot is polling...")
+    bot.infinity_polling()

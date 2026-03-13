@@ -19,7 +19,7 @@ def run_flask():
 
 def keep_alive():
     # သင့် Render App URL ကို ဒီနေရာမှာ အမှန်ထည့်ပေးပါ
-    URL = "https://my-multi-bot-zgc0.onrender.com"
+    URL = "https://my-multi-bot-ytkk.onrender.com"
     while True:
         try: requests.get(URL, timeout=15)
         except: pass

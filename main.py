@@ -1,11 +1,15 @@
 import telebot
 import os
 import asyncio
+import logging
 from threading import Thread
 from flask import Flask
 from supabase import create_client
 from pyrogram import Client, filters
 from datetime import datetime, timedelta
+
+# --- Logging ---
+logging.basicConfig(level=logging.INFO)
 
 # --- Configuration ---
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 7737151643))
@@ -17,17 +21,21 @@ API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 running_userbots = {}
-app = Flask('')
+
+# --- Flask Server (Render Port Binding Fix) ---
+app = Flask(__name__)
 
 @app.route('/')
-def home(): return "AFK SYSTEM: ONLINE"
+def health_check():
+    return "AFK SYSTEM IS LIVE", 200
 
 def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    # Render က ပေးတဲ့ PORT ကို အတိအကျ သုံးရပါမယ်
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
-# --- Isolated Database Handler (Runtime Error ကို ကျော်လွှားရန်) ---
+# --- Database Handler ---
 def safe_db_call(func, *args, **kwargs):
-    # Loop အသစ်စက်စက် တစ်ခုဆောက်ပြီးမှ DB အလုပ်လုပ်ခိုင်းတာပါ
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -36,7 +44,6 @@ def safe_db_call(func, *args, **kwargs):
     finally:
         loop.close()
 
-# Database Functions
 def get_user_data(db, uid):
     res = db.table("approved_users").select("*").eq("user_id", uid).execute()
     return res.data
@@ -55,14 +62,12 @@ def get_all_active_users(db):
 def userbot_worker(uid, session_str, afk_msg):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
     async def start_ub():
         try:
             ub = Client(name=f"ub_{uid}", session_string=session_str, 
                         api_id=API_ID, api_hash=API_HASH, in_memory=True)
             await ub.start()
             running_userbots[uid] = ub
-            
             @ub.on_message(filters.private & ~filters.me & ~filters.bot)
             async def handler(client, message):
                 try:
@@ -71,8 +76,8 @@ def userbot_worker(uid, session_str, afk_msg):
                         await message.reply(afk_msg)
                 except: pass
             await asyncio.Event().wait()
-        except: pass
-
+        except Exception as e:
+            logging.error(f"Userbot {uid} failed: {e}")
     loop.run_until_complete(start_ub())
 
 # --- Bot Handlers ---
@@ -80,11 +85,12 @@ def userbot_worker(uid, session_str, afk_msg):
 def add_user(m):
     if m.chat.id != ADMIN_ID: return
     try:
-        _, tid, days = m.text.split()
-        expiry = (datetime.now() + timedelta(days=int(days))).date().isoformat()
-        safe_db_call(upsert_user, {"user_id": int(tid), "expiry_date": expiry})
-        bot.reply_to(m, f"✅ User {tid} ကို {days} ရက် တိုးပေးပြီး။")
-    except: bot.reply_to(m, "Format: /add [id] [days]")
+        parts = m.text.split()
+        tid, days = int(parts[1]), int(parts[2])
+        expiry = (datetime.now() + timedelta(days=days)).date().isoformat()
+        safe_db_call(upsert_user, {"user_id": tid, "expiry_date": expiry})
+        bot.reply_to(m, f"✅ User {tid} Added ({days} Days)")
+    except Exception as e: bot.reply_to(m, f"❌ Error: {e}")
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
@@ -106,9 +112,12 @@ def finalize(m, session_str):
     bot.send_message(uid, "🚀 AFK Bot စတင်ပါပြီ။")
 
 if __name__ == "__main__":
-    Thread(target=run_flask, daemon=True).start()
+    # Flask ကို thread နဲ့ အရင် run ထားပါမယ်
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    # Startup: အရင်ရှိပြီးသားသူတွေကို ပြန်နှိုးခြင်း
+    # Startup ပြန်နှိုးခြင်း
     try:
         users = safe_db_call(get_all_active_users)
         for u in users:
@@ -116,5 +125,5 @@ if __name__ == "__main__":
                 Thread(target=userbot_worker, args=(u['user_id'], u['string'], u['afk_text']), daemon=True).start()
     except: pass
 
-    print("Bot is Polling...")
+    logging.info("Bot is starting polling...")
     bot.infinity_polling()

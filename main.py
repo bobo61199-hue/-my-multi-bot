@@ -8,7 +8,7 @@ from threading import Thread
 from pyrogram import Client, filters, types
 from supabase import create_client
 
-# --- Flask Server (Render အတွက် Port Binding အမှန်) ---
+# --- Flask Server (Render အတွက် Port 10000 Fix လုပ်ထားသည်) ---
 app = Flask('')
 
 @app.route('/')
@@ -16,11 +16,13 @@ def home():
     return "AFK MULTI-BOT: SYSTEM ONLINE"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))
+    # မင်းသုံးချင်တဲ့ Port 10000 ကို ဒီမှာ အသေထည့်ထားပေးတယ်
+    port = 10000
+    print(f"Flask Server is starting on Port: {port}")
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # မင်းအခုပေးတဲ့ URL အသစ်
+    # သင့် Render App URL (URL အသစ်နဲ့ အမြဲစစ်ပေးပါ)
     URL = "https://my-multi-bot-7nrt.onrender.com"
     while True:
         try: 
@@ -29,7 +31,7 @@ def keep_alive():
             pass
         time.sleep(300)
 
-# --- Configuration (Environment Variables မှ ဖတ်ခြင်း) ---
+# --- Configuration (Environment Variables) ---
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 7737151643))
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://xslvzwfizcvdbjckpsem.supabase.co")
@@ -43,8 +45,10 @@ running_userbots = {}
 # --- Userbot Logic ---
 async def start_userbot(uid, session_str, afk_content):
     if uid in running_userbots:
-        try: await running_userbots[uid].stop()
-        except: pass
+        try: 
+            await running_userbots[uid].stop()
+        except: 
+            pass
 
     async def run():
         while True:
@@ -73,7 +77,8 @@ async def start_userbot(uid, session_str, afk_content):
                                 await message.reply_sticker(reply.replace("sticker:", ""))
                             else:
                                 await message.reply(reply)
-                    except: pass
+                    except: 
+                        pass
                 
                 await asyncio.Event().wait()
             except: 
@@ -107,7 +112,8 @@ async def main_bot():
             tid = int(m.text.split()[1])
             kb = types.InlineKeyboardMarkup([[types.InlineKeyboardButton("၁ လ", callback_data=f"dur_{tid}_30")]])
             await m.reply(f"👤 User: `{tid}` သက်တမ်းရွေးပါ။", reply_markup=kb)
-        except: pass
+        except: 
+            pass
 
     @bot.on_callback_query(filters.regex(r"^dur_"))
     async def set_dur(c, q):
@@ -152,23 +158,36 @@ async def main_bot():
 
     await bot.start()
     
+    # ပြန်တက်လာရင် ရှိပြီးသား Userbot တွေ ပြန်နှိုးခြင်း
     try:
         existing = db.table("approved_users").select("*").execute().data
         if existing:
             for u in existing:
                 if u.get('string'): 
                     await start_userbot(u['user_id'], u['string'], u['afk_text'])
-    except: pass
+    except: 
+        pass
             
     await asyncio.Event().wait()
 
+# --- Execution ---
 if __name__ == "__main__":
-    Thread(target=run_flask, daemon=True).start()
-    Thread(target=keep_alive, daemon=True).start()
+    # Flask နဲ့ Keep Alive ကို Thread တွေနဲ့ သီးသန့်ခွဲမောင်းမယ်
+    t1 = Thread(target=run_flask, daemon=True)
+    t1.start()
     
-    async def run_main():
-        try: await main_bot()
-        except Exception as e: print(f"Main Bot Error: {e}")
+    t2 = Thread(target=keep_alive, daemon=True)
+    t2.start()
+    
+    # Main Bot ကို Asyncio Event Loop နဲ့ run မယ်
+    async def run_app():
+        try:
+            await main_bot()
+        except Exception as e:
+            print(f"CRITICAL ERROR: {e}")
 
-    try: asyncio.run(run_main())
-    except KeyboardInterrupt: pass
+    try:
+        asyncio.run(run_app())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+

@@ -8,24 +8,30 @@ from threading import Thread
 from pyrogram import Client, filters, types
 from supabase import create_client
 
-# --- Flask Server (Render Keep Alive) ---
+# --- Flask Server (Render အတွက် Port Binding အမှန်) ---
 app = Flask('')
+
 @app.route('/')
-def home(): return "AFK MULTI-BOT: SYSTEM ONLINE"
+def home(): 
+    return "AFK MULTI-BOT: SYSTEM ONLINE"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
+    # Render Dashboard က PORT variable ကို အရင်ဖတ်ပါမယ်၊ မရှိရင် 10000 သုံးပါမယ်
+    port = int(os.environ.get("PORT", 10000))
+    # host='0.0.0.0' က Render အတွက် မဖြစ်မနေ လိုအပ်ပါတယ်
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # သင့် Render App URL ကို ဒီနေရာမှာ အမှန်ထည့်ပေးပါ
+    # သင့် Render App URL ကို Dashboard မှာကြည့်ပြီး ဒီနေရာမှာ အမှန်ထည့်ပါ
     URL = "https://my-multi-bot-ytkk.onrender.com"
     while True:
-        try: requests.get(URL, timeout=15)
-        except: pass
+        try: 
+            requests.get(URL, timeout=15)
+        except: 
+            pass
         time.sleep(300)
 
-# --- Configuration ---
+# --- Configuration (Environment Variables မှ ဖတ်ခြင်း) ---
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 7737151643))
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://xslvzwfizcvdbjckpsem.supabase.co")
@@ -36,16 +42,24 @@ API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
 running_userbots = {}
 
-# --- Userbot Core Logic ---
+# --- Userbot Logic ---
 async def start_userbot(uid, session_str, afk_content):
     if uid in running_userbots:
-        try: await running_userbots[uid].stop()
-        except: pass
+        try: 
+            await running_userbots[uid].stop()
+        except: 
+            pass
 
     async def run():
         while True:
             try:
-                ub = Client(name=f"afk_{uid}", session_string=session_str, api_id=API_ID, api_hash=API_HASH, in_memory=True)
+                ub = Client(
+                    name=f"afk_{uid}", 
+                    session_string=session_str, 
+                    api_id=API_ID, 
+                    api_hash=API_HASH, 
+                    in_memory=True
+                )
                 await ub.start()
                 running_userbots[uid] = ub
                 
@@ -53,27 +67,27 @@ async def start_userbot(uid, session_str, afk_content):
                 async def afk_handler(client, message):
                     try:
                         me = await client.get_me()
-                        # Offline ဖြစ်မှသာ စာပြန်မည်
                         if me.status in ["offline", "long_ago", "last_month"]:
-                            # Database ထဲက အချိန်နှင့်တပြေးညီ Content ကို ယူသုံးမည်
                             res = db.table("approved_users").select("afk_text").eq("user_id", uid).execute()
                             reply = res.data[0]['afk_text'] if res.data else afk_content
                             
-                            # Content က စာသားလား Media လား စစ်ဆေးပြီး ပြန်ပေးခြင်း
                             if reply.startswith("photo:"):
                                 await message.reply_photo(reply.replace("photo:", ""))
                             elif reply.startswith("sticker:"):
                                 await message.reply_sticker(reply.replace("sticker:", ""))
                             else:
                                 await message.reply(reply)
-                    except: pass
+                    except: 
+                        pass
                 
                 await asyncio.Event().wait()
             except: 
-                await asyncio.sleep(60) # Error တက်ပါက ၁ မိနစ်နားပြီး ပြန်နှိုးမည်
+                # Error ဖြစ်ရင် 60 sec နားပြီး ပြန်ကြိုးစားမယ်
+                await asyncio.sleep(60)
+                
     asyncio.create_task(run())
 
-# --- Main API Bot ---
+# --- Main Bot ---
 async def main_bot():
     bot = Client("main_api_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -83,11 +97,10 @@ async def main_bot():
         res = db.table("approved_users").select("*").eq("user_id", uid).execute()
         if res.data:
             db.table("user_states").upsert({"user_id": uid, "state": "awaiting_string"}).execute()
-            await m.reply(f"✅ ဝန်ဆောင်မှုရှိပါသည်။ (Expiry: {res.data[0]['expiry_date']})\nString Session ပို့ပေးပါ။")
+            await m.reply(f"✅ ဝန်ဆောင်မှုရှိပါသည်။ (Expiry: {res.data[0]['expiry_date']})\n\nString Session ပို့ပေးပါ။")
         else:
             await m.reply("❌ ဝန်ဆောင်မှု မဝယ်ရသေးပါ။ @Cambai138 ကို ဆက်သွယ်ပါ။")
 
-    # Admin Dashboard: လက်ရှိ Bot အခြေအနေ ကြည့်ရန်
     @bot.on_message(filters.command("stats") & filters.user(ADMIN_ID))
     async def stats_handler(c, m):
         total = db.table("approved_users").select("*", count="exact").execute().count
@@ -100,7 +113,8 @@ async def main_bot():
             tid = int(m.text.split()[1])
             kb = types.InlineKeyboardMarkup([[types.InlineKeyboardButton("၁ လ", callback_data=f"dur_{tid}_30")]])
             await m.reply(f"👤 User: `{tid}` သက်တမ်းရွေးပါ။", reply_markup=kb)
-        except: await m.reply("Usage: `/add [ID]`")
+        except: 
+            pass
 
     @bot.on_callback_query(filters.regex(r"^dur_"))
     async def set_dur(c, q):
@@ -145,17 +159,24 @@ async def main_bot():
 
     await bot.start()
     
-    # ပြန်တက်လာရင် ရှိပြီးသား Userbot တွေ ပြန်နှိုးပေးခြင်း
+    # ပြန်တက်လာရင် ရှိပြီးသား Userbot တွေ ပြန်နှိုးခြင်း
     try:
         existing = db.table("approved_users").select("*").execute().data
-        for u in existing:
-            if u.get('string'): await start_userbot(u['user_id'], u['string'], u['afk_text'])
-    except: pass
+        if existing:
+            for u in existing:
+                if u.get('string'): 
+                    await start_userbot(u['user_id'], u['string'], u['afk_text'])
+    except: 
+        pass
             
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
+    # Flask ကို Thread နဲ့ Run ပါမယ်
     Thread(target=run_flask, daemon=True).start()
+    # Keep Alive ကိုလည်း Thread နဲ့ Run ပါမယ်
     Thread(target=keep_alive, daemon=True).start()
+    
+    # Pyrogram (Main Bot) ကို Main Loop မှာ Run ပါမယ်
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main_bot())

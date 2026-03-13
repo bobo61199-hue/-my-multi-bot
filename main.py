@@ -17,17 +17,18 @@ def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
 def keep_alive():
+    # Render URL ရလျှင် ဤနေရာတွင် ထည့်ပါ
     URL = "https://your-bot-name.onrender.com" 
     while True:
         try: requests.get(URL, timeout=15)
         except: pass
         time.sleep(300)
 
-# --- Configuration ---
+# --- Configuration (Updated with your Supabase) ---
 ADMIN_ID = 7737151643 
 BOT_TOKEN = "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A"
 SUPABASE_URL = "https://xslvzwfizcvdbjckpsem.supabase.co"
-SUPABASE_KEY = ''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzbHZ6d2ZpemN2ZGJqY2twc2VtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzODc3ODYsImV4cCI6MjA4ODk2Mzc4Nn0.DC-XWrqBGno4vnWFPP2cPqBMG0zB-LEeKP7Hv6VPnc4
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzbHZ6d2ZpemN2ZGJqY2twc2VtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzODc3ODYsImV4cCI6MjA4ODk2Mzc4Nn0.DC-XWrqBGno4vnWFPP2cPqBMG0zB-LEeKP7Hv6VPnc4"
 
 API_ID = 38876766
 API_HASH = "e8d2d82f38704f4fcf171d3d35d3f811"
@@ -99,7 +100,6 @@ async def main_bot():
             keyboard = types.InlineKeyboardMarkup([[types.InlineKeyboardButton("🛒 ဝယ်ယူရန် ဆက်သွယ်ပါ", url="https://t.me/Cambai138")]])
             await m.reply("❌ **ဝန်ဆောင်မှု မဝယ်ရသေးပါ**\n@Cambai138 ဆီတွင် အရင်ဝယ်ယူပေးပါ။", reply_markup=keyboard)
 
-    # Admin Add with Buttons
     @bot.on_message(filters.command("add") & filters.user(ADMIN_ID))
     async def add_user_start(c, m):
         try:

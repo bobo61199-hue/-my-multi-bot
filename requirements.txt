@@ -4,3 +4,4 @@ tgcrypto
 supabase
 flask
 requests
+python-dotenv

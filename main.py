@@ -16,14 +16,12 @@ def home():
     return "AFK MULTI-BOT: SYSTEM ONLINE"
 
 def run_flask():
-    # Render Dashboard က PORT variable ကို အရင်ဖတ်ပါမယ်၊ မရှိရင် 10000 သုံးပါမယ်
     port = int(os.environ.get("PORT", 10000))
-    # host='0.0.0.0' က Render အတွက် မဖြစ်မနေ လိုအပ်ပါတယ်
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # သင့် Render App URL ကို Dashboard မှာကြည့်ပြီး ဒီနေရာမှာ အမှန်ထည့်ပါ
-    URL = "https://my-multi-bot-ytkk.onrender.com"
+    # မင်းအခုပေးတဲ့ URL အသစ်
+    URL = "https://my-multi-bot-7nrt.onrender.com"
     while True:
         try: 
             requests.get(URL, timeout=15)
@@ -45,10 +43,8 @@ running_userbots = {}
 # --- Userbot Logic ---
 async def start_userbot(uid, session_str, afk_content):
     if uid in running_userbots:
-        try: 
-            await running_userbots[uid].stop()
-        except: 
-            pass
+        try: await running_userbots[uid].stop()
+        except: pass
 
     async def run():
         while True:
@@ -77,12 +73,10 @@ async def start_userbot(uid, session_str, afk_content):
                                 await message.reply_sticker(reply.replace("sticker:", ""))
                             else:
                                 await message.reply(reply)
-                    except: 
-                        pass
+                    except: pass
                 
                 await asyncio.Event().wait()
             except: 
-                # Error ဖြစ်ရင် 60 sec နားပြီး ပြန်ကြိုးစားမယ်
                 await asyncio.sleep(60)
                 
     asyncio.create_task(run())
@@ -113,8 +107,7 @@ async def main_bot():
             tid = int(m.text.split()[1])
             kb = types.InlineKeyboardMarkup([[types.InlineKeyboardButton("၁ လ", callback_data=f"dur_{tid}_30")]])
             await m.reply(f"👤 User: `{tid}` သက်တမ်းရွေးပါ။", reply_markup=kb)
-        except: 
-            pass
+        except: pass
 
     @bot.on_callback_query(filters.regex(r"^dur_"))
     async def set_dur(c, q):
@@ -159,24 +152,23 @@ async def main_bot():
 
     await bot.start()
     
-    # ပြန်တက်လာရင် ရှိပြီးသား Userbot တွေ ပြန်နှိုးခြင်း
     try:
         existing = db.table("approved_users").select("*").execute().data
         if existing:
             for u in existing:
                 if u.get('string'): 
                     await start_userbot(u['user_id'], u['string'], u['afk_text'])
-    except: 
-        pass
+    except: pass
             
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    # Flask ကို Thread နဲ့ Run ပါမယ်
     Thread(target=run_flask, daemon=True).start()
-    # Keep Alive ကိုလည်း Thread နဲ့ Run ပါမယ်
     Thread(target=keep_alive, daemon=True).start()
     
-    # Pyrogram (Main Bot) ကို Main Loop မှာ Run ပါမယ်
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main_bot())
+    async def run_main():
+        try: await main_bot()
+        except Exception as e: print(f"Main Bot Error: {e}")
+
+    try: asyncio.run(run_main())
+    except KeyboardInterrupt: pass

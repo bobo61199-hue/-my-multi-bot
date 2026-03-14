@@ -3,3 +3,4 @@ pyTelegramBotAPI
 supabase
 flask
 python-dotenv
+requests

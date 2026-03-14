@@ -7,72 +7,92 @@ from supabase import create_client
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 import telebot
+from telebot import types
 
-# --- Setup ---
-logging.basicConfig(level=logging.INFO)
+# --- Config ---
+ADMIN_ID = 7737151643
 BOT_TOKEN = "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A"
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-API_ID = int(os.environ.get("API_ID", 38876766))
-API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
+SUPABASE_URL = "https://xslvzwfizcvdbjckpsem.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzbHZ6d2ZpemN2ZGJqY2twc2VtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzODc3ODYsImV4cCI6MjA4ODk2Mzc4Nn0.DC-XWrqBGno4vnWFPP2cPqBMG0zB-LEeKP7Hv6VPnc4"
+API_ID = 38876766
+API_HASH = "e8d2d82f38704f4fcf171d3d35d3f811"
 
 bot = telebot.TeleBot(BOT_TOKEN)
+db = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = Flask(__name__)
-running_clients = {}
 
 @app.route('/')
-def home(): return "SYSTEM ONLINE", 200
+def home(): return "AFK BOT RUNNING 24/7", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- AFK Client Function ---
-async def start_afk_client(uid, session_str, afk_text):
+# --- AFK Worker ---
+async def start_user_afk(uid, session, afk_text):
     try:
-        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        client = TelegramClient(StringSession(session), API_ID, API_HASH)
         await client.start()
-        running_clients[uid] = client
         
         @client.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
-        async def handler(event):
+        async def afk_handler(event):
             me = await client.get_me()
-            # Status စစ်ဆေးခြင်း
+            # User Offline ဖြစ်မှ စာပြန်မည်
             if hasattr(me.status, 'was_online') or me.status is None:
                 await event.reply(afk_text)
-        
-        logging.info(f"✅ User {uid} is now AFK protected.")
         await client.run_until_disconnected()
-    except Exception as e:
-        logging.error(f"❌ Client {uid} Error: {e}")
+    except: pass
 
-# --- Bot Commands ---
+# --- Bot Handlers ---
 @bot.message_handler(commands=['start'])
-def welcome(m):
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
-    res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
+def start_cmd(m):
+    uid = m.from_user.id
+    res = db.table("approved_users").select("*").eq("user_id", uid).execute()
+    
     if res.data:
-        bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String Session ပို့ပေးပါ။")
+        bot.send_message(uid, "✅ အသုံးပြုခွင့်ရှိပါသည်။ String Session နှင့် AFK စာသား ပို့ပေးပါ။")
     else:
-        bot.reply_to(m, "❌ ဝယ်ယူရန် Admin @Cambai138 ကို ဆက်သွယ်ပါ။")
+        # Admin ထံ ခွင့်တောင်းခြင်း
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        btns = [
+            types.InlineKeyboardButton("1 လ ✅", callback_data=f"acc_{uid}_1m"),
+            types.InlineKeyboardButton("2 လ ✅", callback_data=f"acc_{uid}_2m"),
+            types.InlineKeyboardButton("5 လ ✅", callback_data=f"acc_{uid}_5m"),
+            types.InlineKeyboardButton("7 လ ✅", callback_data=f"acc_{uid}_7m"),
+            types.InlineKeyboardButton("1 နှစ် ✅", callback_data=f"acc_{uid}_1y"),
+            types.InlineKeyboardButton("ငြင်းပယ် ❌", callback_data=f"rej_{uid}")
+        ]
+        kb.add(*btns)
+        bot.send_message(ADMIN_ID, f"🔔 တောင်းဆိုမှုသစ်:\nUser: @{m.from_user.username}\nID: `{uid}`", reply_markup=kb)
+        bot.send_message(uid, "⏳ Admin ဆီမှ အသုံးပြုခွင့် တောင်းဆိုထားပါသည်။ ခဏစောင့်ပါ။")
 
-# --- Main Run ---
-async def main():
-    # ၁။ Flask ကို Thread နဲ့ နိုးမယ်
+@bot.callback_query_handler(func=lambda q: True)
+def admin_cb(q):
+    data = q.data.split("_")
+    action, uid = data[0], int(data[1])
+    
+    if action == "acc":
+        dur = data[2]
+        db.table("approved_users").upsert({"user_id": uid, "status": "active"}).execute()
+        bot.send_message(uid, f"🎉 Admin က ခွင့်ပြုလိုက်ပါပြီ။ ({dur}) သုံးစွဲနိုင်ပါသည်။")
+        bot.answer_callback_query(q.id, "လက်ခံပြီးပါပြီ")
+    elif action == "rej":
+        bot.send_message(uid, "❌ Admin @Cambai138 ဆီမှ အသုံးပြုခွင့် မဝယ်ရသေးပါ။")
+        bot.answer_callback_query(q.id, "ငြင်းပယ်လိုက်ပါပြီ")
+
+# --- Run ---
+async def main_loop():
     Thread(target=run_flask, daemon=True).start()
     
-    # ၂။ Database က User တွေကို ပြန်နှိုးမယ်
+    # DB ထဲက user တွေ ပြန်နှိုးခြင်း
     try:
-        db = create_client(SUPABASE_URL, SUPABASE_KEY)
         users = db.table("approved_users").select("*").execute().data
         for u in users:
             if u.get('string') and u.get('afk_text'):
-                asyncio.create_task(start_afk_client(u['user_id'], u['string'], u['afk_text']))
+                asyncio.create_task(start_user_afk(u['user_id'], u['string'], u['afk_text']))
     except: pass
 
-    # ၃။ Main Bot ကို Polling လုပ်မယ်
-    logging.info("🚀 Bot is starting...")
     bot.infinity_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_loop())

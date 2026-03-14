@@ -3,11 +3,11 @@ import asyncio
 import logging
 from threading import Thread
 from flask import Flask
-from supabase import create_client
+from supabase_py_async import create_client  # Async Client ကို ပြောင်းသုံးထားပါတယ်
 from pyrogram import Client, filters
 from telebot.async_telebot import AsyncTeleBot
 
-# --- Basic Setup ---
+# --- Setup ---
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = "8731265744:AAGGaLhfxWZlMwRihJd254Sl_ItnU5sbF6A"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -19,38 +19,34 @@ bot = AsyncTeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "AFK SYSTEM: ACTIVE", 200
+def home(): return "AFK SYSTEM LIVE", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- Userbot Worker ---
-async def start_afk(uid, session, text):
+# --- AFK Logic ---
+async def start_userbot(uid, session, text):
     try:
         ub = Client(name=f"u_{uid}", session_string=session, 
                     api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await ub.start()
         
         @ub.on_message(filters.private & ~filters.me & ~filters.bot)
-        async def afk_handler(c, m):
-            try:
-                me = await c.get_me()
-                if me.status in ["offline", "long_ago"]:
-                    await m.reply(text)
-            except: pass
+        async def reply_handler(c, m):
+            me = await c.get_me()
+            if me.status in ["offline", "long_ago"]:
+                await m.reply(text)
         
-        logging.info(f"✅ Userbot {uid} started.")
         await asyncio.Event().wait()
-    except Exception as e:
-        logging.error(f"❌ Userbot {uid} failed: {e}")
+    except: pass
 
-# --- Bot Command ---
+# --- Bot Commands ---
 @bot.message_handler(commands=['start'])
 async def welcome(m):
-    # supabase client ကို command ထဲမှာပဲ လိုအပ်မှ ခေါ်သုံးပါမယ်
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
-    res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
+    # Async DB call
+    db = await create_client(SUPABASE_URL, SUPABASE_KEY)
+    res = await db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
     if res.data:
         await bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String Session ပို့ပေးပါ။")
     else:
@@ -58,28 +54,23 @@ async def welcome(m):
 
 # --- Main Engine ---
 async def main():
-    # ၁။ Port Binding အတွက် Flask ကို background မှာ နိုးမယ်
+    # Flask ကို background မှာ မောင်းမယ် (Port binding error မတက်အောင်)
     Thread(target=run_flask, daemon=True).start()
     
-    # ၂။ Database က User တွေကို async loop ထဲကနေ ပြန်နှိုးမယ်
+    # Database ထဲက user တွေကို ပြန်နှိုးမယ်
     try:
-        db = create_client(SUPABASE_URL, SUPABASE_KEY)
-        users = db.table("approved_users").select("*").execute().data
-        for u in users:
+        db = await create_client(SUPABASE_URL, SUPABASE_KEY)
+        users = await db.table("approved_users").select("*").execute()
+        for u in users.data:
             if u.get('string') and u.get('afk_text'):
-                asyncio.create_task(start_afk(u['user_id'], u['string'], u['afk_text']))
+                asyncio.create_task(start_userbot(u['user_id'], u['string'], u['afk_text']))
     except Exception as e:
-        logging.error(f"Database Error: {e}")
+        logging.error(f"DB Error: {e}")
 
-    # ၃။ Bot Polling စတင်မယ်
-    logging.info("🚀 Starting Bot Polling...")
+    logging.info("🚀 Bot is Polling...")
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
-    # Python 3.14 error ကို ကျော်ဖို့ loop ကို အတိအကျ သတ်မှတ်ပေးရပါတယ်
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        pass
+    # Python 3.14 ရဲ့ asyncio loop ပြဿနာကို ဖြေရှင်းနည်း
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())

@@ -19,56 +19,49 @@ bot = AsyncTeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "AFK SYSTEM: ACTIVE", 200
+def home(): return "AFK SYSTEM: ACTIVE", 200
 
 def run_flask():
-    # Render အတွက် Port Binding ကို သီးသန့် thread နဲ့ run ပါမယ်
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- AFK Worker Function ---
+# --- Userbot Worker ---
 async def start_afk(uid, session, text):
     try:
-        ub = Client(
-            name=f"u_{uid}", 
-            session_string=session, 
-            api_id=API_ID, 
-            api_hash=API_HASH, 
-            in_memory=True
-        )
+        ub = Client(name=f"u_{uid}", session_string=session, 
+                    api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await ub.start()
         
         @ub.on_message(filters.private & ~filters.me & ~filters.bot)
         async def afk_handler(c, m):
             try:
                 me = await c.get_me()
-                # Status က offline ဖြစ်နေမှ reply ပြန်ပါမယ်
                 if me.status in ["offline", "long_ago"]:
                     await m.reply(text)
             except: pass
         
-        logging.info(f"✅ Userbot {uid} is running.")
+        logging.info(f"✅ Userbot {uid} started.")
         await asyncio.Event().wait()
     except Exception as e:
         logging.error(f"❌ Userbot {uid} failed: {e}")
 
-# --- Bot Commands ---
+# --- Bot Command ---
 @bot.message_handler(commands=['start'])
 async def welcome(m):
+    # supabase client ကို command ထဲမှာပဲ လိုအပ်မှ ခေါ်သုံးပါမယ်
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
     res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
     if res.data:
         await bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String Session ပို့ပေးပါ။")
     else:
-        await bot.reply_to(m, "❌ ဝယ်ယူရန် Admin @Cambai138 ကို ဆက်သွယ်ပါ။")
+        await bot.reply_to(m, "❌ ဝယ်ယူရန် @Cambai138 ကို ဆက်သွယ်ပါ။")
 
 # --- Main Engine ---
 async def main():
     # ၁။ Port Binding အတွက် Flask ကို background မှာ နိုးမယ်
     Thread(target=run_flask, daemon=True).start()
     
-    # ၂။ Database က User တွေကို တစ်ခါတည်း ပြန်နှိုးမယ်
+    # ၂။ Database က User တွေကို async loop ထဲကနေ ပြန်နှိုးမယ်
     try:
         db = create_client(SUPABASE_URL, SUPABASE_KEY)
         users = db.table("approved_users").select("*").execute().data
@@ -76,14 +69,14 @@ async def main():
             if u.get('string') and u.get('afk_text'):
                 asyncio.create_task(start_afk(u['user_id'], u['string'], u['afk_text']))
     except Exception as e:
-        logging.error(f"Startup Database Error: {e}")
+        logging.error(f"Database Error: {e}")
 
-    # ၃။ Main Bot Polling ကို စတင်မယ်
-    logging.info("🚀 Main Bot is starting...")
+    # ၃။ Bot Polling စတင်မယ်
+    logging.info("🚀 Starting Bot Polling...")
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
-    # Python 3.14 ရဲ့ loop error ကို ကျော်ဖို့ manual loop ဆောက်တာပါ
+    # Python 3.14 error ကို ကျော်ဖို့ loop ကို အတိအကျ သတ်မှတ်ပေးရပါတယ်
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

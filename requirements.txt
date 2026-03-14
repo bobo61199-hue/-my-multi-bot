@@ -1,7 +1,6 @@
 pyTelegramBotAPI
 pyrogram
 tgcrypto
-supabase
+supabase-py-async
 flask
-requests
 aiohttp

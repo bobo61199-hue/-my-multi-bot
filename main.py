@@ -3,9 +3,10 @@ import asyncio
 import logging
 from threading import Thread
 from flask import Flask
-from supabase_py_async import create_client  # Async Client ကို ပြောင်းသုံးထားပါတယ်
-from pyrogram import Client, filters
-from telebot.async_telebot import AsyncTeleBot
+from supabase import create_client
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+import telebot
 
 # --- Setup ---
 logging.basicConfig(level=logging.INFO)
@@ -15,62 +16,63 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 API_ID = int(os.environ.get("API_ID", 38876766))
 API_HASH = os.environ.get("API_HASH", "e8d2d82f38704f4fcf171d3d35d3f811")
 
-bot = AsyncTeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
+running_clients = {}
 
 @app.route('/')
-def home(): return "AFK SYSTEM LIVE", 200
+def home(): return "SYSTEM ONLINE", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- AFK Logic ---
-async def start_userbot(uid, session, text):
+# --- AFK Client Function ---
+async def start_afk_client(uid, session_str, afk_text):
     try:
-        ub = Client(name=f"u_{uid}", session_string=session, 
-                    api_id=API_ID, api_hash=API_HASH, in_memory=True)
-        await ub.start()
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        await client.start()
+        running_clients[uid] = client
         
-        @ub.on_message(filters.private & ~filters.me & ~filters.bot)
-        async def reply_handler(c, m):
-            me = await c.get_me()
-            if me.status in ["offline", "long_ago"]:
-                await m.reply(text)
+        @client.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
+        async def handler(event):
+            me = await client.get_me()
+            # Status စစ်ဆေးခြင်း
+            if hasattr(me.status, 'was_online') or me.status is None:
+                await event.reply(afk_text)
         
-        await asyncio.Event().wait()
-    except: pass
+        logging.info(f"✅ User {uid} is now AFK protected.")
+        await client.run_until_disconnected()
+    except Exception as e:
+        logging.error(f"❌ Client {uid} Error: {e}")
 
 # --- Bot Commands ---
 @bot.message_handler(commands=['start'])
-async def welcome(m):
-    # Async DB call
-    db = await create_client(SUPABASE_URL, SUPABASE_KEY)
-    res = await db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
+def welcome(m):
+    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+    res = db.table("approved_users").select("*").eq("user_id", m.chat.id).execute()
     if res.data:
-        await bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String Session ပို့ပေးပါ။")
+        bot.reply_to(m, "✅ ဝန်ဆောင်မှုရှိပါသည်။ String Session ပို့ပေးပါ။")
     else:
-        await bot.reply_to(m, "❌ ဝယ်ယူရန် @Cambai138 ကို ဆက်သွယ်ပါ။")
+        bot.reply_to(m, "❌ ဝယ်ယူရန် Admin @Cambai138 ကို ဆက်သွယ်ပါ။")
 
-# --- Main Engine ---
+# --- Main Run ---
 async def main():
-    # Flask ကို background မှာ မောင်းမယ် (Port binding error မတက်အောင်)
+    # ၁။ Flask ကို Thread နဲ့ နိုးမယ်
     Thread(target=run_flask, daemon=True).start()
     
-    # Database ထဲက user တွေကို ပြန်နှိုးမယ်
+    # ၂။ Database က User တွေကို ပြန်နှိုးမယ်
     try:
-        db = await create_client(SUPABASE_URL, SUPABASE_KEY)
-        users = await db.table("approved_users").select("*").execute()
-        for u in users.data:
+        db = create_client(SUPABASE_URL, SUPABASE_KEY)
+        users = db.table("approved_users").select("*").execute().data
+        for u in users:
             if u.get('string') and u.get('afk_text'):
-                asyncio.create_task(start_userbot(u['user_id'], u['string'], u['afk_text']))
-    except Exception as e:
-        logging.error(f"DB Error: {e}")
+                asyncio.create_task(start_afk_client(u['user_id'], u['string'], u['afk_text']))
+    except: pass
 
-    logging.info("🚀 Bot is Polling...")
-    await bot.polling(non_stop=True)
+    # ၃။ Main Bot ကို Polling လုပ်မယ်
+    logging.info("🚀 Bot is starting...")
+    bot.infinity_polling()
 
 if __name__ == "__main__":
-    # Python 3.14 ရဲ့ asyncio loop ပြဿနာကို ဖြေရှင်းနည်း
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())

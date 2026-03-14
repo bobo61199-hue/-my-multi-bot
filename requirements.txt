@@ -1,6 +1,5 @@
+telethon
 pyTelegramBotAPI
-pyrogram
-tgcrypto
-supabase-py-async
+supabase
 flask
-aiohttp
+python-dotenv
